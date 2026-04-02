@@ -158,7 +158,7 @@ export async function processDocumentsOpenAI(files: File[], logicalFileName: str
           strict: true
         }
       },
-      temperature: 0.1,
+      temperature: 1,
     });
   } catch (genError: any) {
     console.error("OpenAI API Error:", genError);
