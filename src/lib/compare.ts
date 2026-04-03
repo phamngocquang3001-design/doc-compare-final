@@ -256,46 +256,13 @@ function isStickyNoteProduct(value: string | null | undefined): boolean {
   return /giay nho|sticky|memo note|memo notes|note pad|giay ghi chu|block giay|block giay nho|giay note|giay ghi chu/.test(normalized);
 }
 
-function getImportantTokenCategories(text: string): Record<string, Set<string>> {
-  const normalized = normalizeProductNameSmart(text);
-  const categories: Record<string, Set<string>> = {
-    thickness: new Set<string>(),
-    size: new Set<string>(),
-    grade: new Set<string>(),
-  };
-
-  const thicknessMatches = normalized.match(/\b(?:0\.35|0,35|0\.5|0,5|0\.7|0,7|1\.0|1,0)\b/g);
-  thicknessMatches?.forEach(v => categories.thickness.add(v.replace(',', '.')));
-
-  const sizeMatches = normalized.match(/\b(?:a4|a5|no10|no12|\d+cm)\b/g);
-  sizeMatches?.forEach(v => categories.size.add(v));
-
-  const gradeMatches = normalized.match(/\b(?:r1|r3)\b/g);
-  gradeMatches?.forEach(v => categories.grade.add(v));
-
-  return categories;
-}
-
-function hasImportantTokenConflict(a: string, b: string): boolean {
-  const categoriesA = getImportantTokenCategories(a);
-  const categoriesB = getImportantTokenCategories(b);
-
-  for (const category of Object.keys(categoriesA) as Array<keyof typeof categoriesA>) {
-    const valuesA = categoriesA[category];
-    const valuesB = categoriesB[category];
-    if (valuesA.size === 0 || valuesB.size === 0) continue;
-    const union = new Set([...valuesA, ...valuesB]);
-    if (union.size > 1) return true;
-  }
-
-  return false;
-}
-
 function calculateNameSimilarity(a: string, b: string): number {
   const rawA = normalizeProductNameSmart(a);
   const rawB = normalizeProductNameSmart(b);
 
   if (!rawA || !rawB) return 0;
+
+  // Pass 1: Exact phrase match after full normalization → perfect score
   if (rawA === rawB) return 1;
 
   const cleanA = stripProductCodeFromName(rawA);
@@ -305,13 +272,10 @@ function calculateNameSimilarity(a: string, b: string): number {
   if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) return 0.94;
   if (stripLeadingCode(cleanA) === stripLeadingCode(cleanB)) return 0.92;
 
+  // Pass 2: Fuzzy edit-distance score (semantic vectors handled by caller)
   const dist = levenshteinDistance(cleanA, cleanB);
   const maxLen = Math.max(cleanA.length, cleanB.length);
-  let score = maxLen > 0 ? 1 - dist / maxLen : 0;
-
-  if (hasImportantTokenConflict(rawA, rawB)) {
-    score = Math.min(score, 0.65);
-  }
+  const score = maxLen > 0 ? 1 - dist / maxLen : 0;
 
   return score;
 }
@@ -391,13 +355,13 @@ export async function generateReport(
     for (const item of validItems) {
       const codeKey = normalizeCodeText(item.itemCode);
       const nameKey = normalizeMatchText(item.itemName);
-      
+
       // Group by itemCode primarily. If code is missing, fallback to name to avoid squashing
       const key = codeKey ? `CODE-${codeKey}` : `NAME-${nameKey}`;
 
       if (itemMap.has(key)) {
         const existing = itemMap.get(key)!;
-        
+
         // Sum quantities
         if (item.quantity !== null) {
           existing.quantity = (existing.quantity || 0) + item.quantity;
@@ -407,7 +371,7 @@ export async function generateReport(
         if (item.totalPrice !== null) {
           existing.totalPrice = (existing.totalPrice || 0) + item.totalPrice;
         }
-        
+
         // Ensure unit and unitPrice stay populated if missing in first occurrence
         if (!existing.unit && item.unit) existing.unit = item.unit;
         if (existing.unitPrice === null && item.unitPrice !== null) existing.unitPrice = item.unitPrice;
@@ -464,7 +428,7 @@ export async function generateReport(
   }));
 
   // 4. Compare each item in base file against other files using semantic similarity and itemCode
-  
+
   const allAssignments: Record<number, Record<string, { item: LineItem; score: number }[]>> = {};
   const allSuggestions: Record<number, Record<string, { item: LineItem; score: number }[]>> = {};
 
@@ -518,9 +482,6 @@ export async function generateReport(
           finalScore = Math.max(finalScore, 0.9);
         }
 
-        if (hasImportantTokenConflict(baseItem.itemName, otherItem.itemName)) {
-          finalScore = Math.min(finalScore, 0.65);
-        }
 
         // Add small tie-breakers for exact numbers so it distributes better
         if (baseItem.quantity !== null && otherItem.quantity !== null && baseItem.quantity === otherItem.quantity) {
@@ -538,7 +499,7 @@ export async function generateReport(
         }
       }
 
-      if (bestBaseIdx !== -1 && highestScore >= 0.75) {
+      if (bestBaseIdx !== -1 && highestScore >= 0.40) {
         allAssignments[bestBaseIdx][other.file.fileName].push({
           item: otherItem,
           score: Math.min(1, highestScore)
@@ -551,7 +512,7 @@ export async function generateReport(
       const scoresForBase = scoreMatrix.filter(m => m.baseIdx === i).sort((a, b) => b.score - a.score);
       const assignedToThis = allAssignments[i][other.file.fileName].map(a => a.item);
       const suggestions: { item: LineItem; score: number }[] = [];
-      
+
       for (const s of scoresForBase) {
         const otherItem = other.file.lineItems[s.otherIdx];
         if (!assignedToThis.includes(otherItem)) {
@@ -565,7 +526,7 @@ export async function generateReport(
 
   for (let i = 0; i < baseFile.lineItems.length; i++) {
     const baseItem = baseFile.lineItems[i];
-    
+
     let maxRowsForThisBaseItem = 1;
     for (const other of otherFiles) {
       const assigned = allAssignments[i][other.fileName];
@@ -575,82 +536,96 @@ export async function generateReport(
         maxRowsForThisBaseItem = assigned.length;
       }
     }
-    
+
     for (let rowIdx = 0; rowIdx < maxRowsForThisBaseItem; rowIdx++) {
       const comparisons: Record<string, ComparisonDetail> = {};
 
       for (const other of otherFiles) {
         const assigned = allAssignments[i][other.fileName];
         const matchData = assigned[rowIdx];
-        
-        const bestMatch = matchData?.item;
-        const highestScore = matchData?.score || 0;
-        
+
+        let bestMatch = matchData?.item;
+        let highestScore = matchData?.score || 0;
+
         // Show suggestions only on the last duplicated row for this base item
         const suggestions = (rowIdx === maxRowsForThisBaseItem - 1) ? allSuggestions[i][other.fileName] : [];
+
+        // When no item was directly assigned, promote the best suggestion
+        // with score >= 0.40 so it still shows up instead of being hidden
+        if (!bestMatch && suggestions.length > 0) {
+          const topSuggestion = suggestions[0];
+          if (topSuggestion && topSuggestion.score >= 0.40) {
+            bestMatch = topSuggestion.item;
+            highestScore = topSuggestion.score;
+          }
+        }
 
         let status: MatchStatus = 'MISSING';
         const discrepancies: string[] = [];
 
-        if (bestMatch && highestScore >= 0.75) {
+        if (bestMatch && highestScore >= 0.40) {
           const basePrimaryCode = getPrimaryProductCode(baseItem);
           const otherPrimaryCode = getPrimaryProductCode(bestMatch);
           const itemCodeSimilarity = calculateCodeSimilarity(baseItem.itemCode, bestMatch.itemCode);
           const itemNameSimilarity = calculateNameSimilarity(baseItem.itemName, bestMatch.itemName);
           const codeCompatible = areProductCodesCompatible(baseItem, bestMatch);
-          const importantConflict = hasImportantTokenConflict(baseItem.itemName, bestMatch.itemName);
-          const contextUnitEquivalent = shouldIgnoreUnitDifference(baseItem, bestMatch);
-          const strongName = itemNameSimilarity >= 0.88;
-          const primaryCodeLabel = basePrimaryCode || otherPrimaryCode || '';
 
-          if (codeCompatible && strongName && !importantConflict && contextUnitEquivalent) {
-            status = 'MATCH';
-          } else if (highestScore >= 0.88 && !importantConflict && contextUnitEquivalent) {
-            status = 'MATCH';
-          } else {
-            status = 'UNCERTAIN';
-            discrepancies.push(`Tên/Mã mặt hàng khớp một phần (Độ tương đồng tổng hợp: ${Math.round(highestScore * 100)}%)`);
-          }
+          // ── Collect attribute discrepancies ──
+          let hasAttributeDiscrepancy = false;
 
           if (activeCompareFields.includes('itemCode') && !codeCompatible) {
             if (basePrimaryCode && otherPrimaryCode) {
-              status = status === 'UNCERTAIN' ? 'UNCERTAIN' : 'MISMATCH';
+              hasAttributeDiscrepancy = true;
               discrepancies.push(`Mã mặt hàng khác: Gốc (${basePrimaryCode}) vs Đối chiếu (${otherPrimaryCode})`);
             } else if (itemCodeSimilarity < 0.6 && itemNameSimilarity < 0.85) {
-              status = status === 'UNCERTAIN' ? 'UNCERTAIN' : 'MISMATCH';
+              hasAttributeDiscrepancy = true;
               discrepancies.push(`Mã hàng lệch: Gốc (${baseItem.itemCode}) vs Đối chiếu (${bestMatch.itemCode})`);
             }
           }
 
-          if (activeCompareFields.includes('itemName') && itemNameSimilarity < 0.75 && !codeCompatible) {
-            status = status === 'UNCERTAIN' ? 'UNCERTAIN' : 'MISMATCH';
-            discrepancies.push(`Tên hàng lệch: Gốc (${baseItem.itemName}) vs Đối chiếu (${bestMatch.itemName})`);
-          }
-
           if (activeCompareFields.includes('unit') && !shouldIgnoreUnitDifference(baseItem, bestMatch)) {
-            status = status === 'UNCERTAIN' ? 'UNCERTAIN' : 'MISMATCH';
+            hasAttributeDiscrepancy = true;
             discrepancies.push(`Đơn vị tính lệch: Gốc (${baseItem.unit ?? 'Trống'}) vs Đối chiếu (${bestMatch.unit ?? 'Trống'})`);
           }
 
           if (activeCompareFields.includes('quantity') && isFieldDifferent('quantity', baseItem, bestMatch)) {
-            status = status === 'UNCERTAIN' ? 'UNCERTAIN' : 'MISMATCH';
+            hasAttributeDiscrepancy = true;
             discrepancies.push(`Số lượng lệch: Gốc (${baseItem.quantity ?? 'Trống'}) vs Đối chiếu (${bestMatch.quantity ?? 'Trống'})`);
           }
 
           if (activeCompareFields.includes('unitPrice') && isFieldDifferent('unitPrice', baseItem, bestMatch)) {
-            status = status === 'UNCERTAIN' ? 'UNCERTAIN' : 'MISMATCH';
+            hasAttributeDiscrepancy = true;
             discrepancies.push(`Đơn giá lệch: Gốc (${baseItem.unitPrice ?? 'Trống'}) vs Đối chiếu (${bestMatch.unitPrice ?? 'Trống'})`);
           }
 
           if (activeCompareFields.includes('totalPrice') && isFieldDifferent('totalPrice', baseItem, bestMatch)) {
-            status = status === 'UNCERTAIN' ? 'UNCERTAIN' : 'MISMATCH';
+            hasAttributeDiscrepancy = true;
             discrepancies.push(`Thành tiền lệch: Gốc (${baseItem.totalPrice ?? 'Trống'}) vs Đối chiếu (${bestMatch.totalPrice ?? 'Trống'})`);
+          }
+
+          // Name mismatch note (informational, does not force MISMATCH — identity quality is captured by score level)
+          if (activeCompareFields.includes('itemName') && itemNameSimilarity < 0.75 && !codeCompatible) {
+            discrepancies.push(`Tên hàng lệch: Gốc (${baseItem.itemName}) vs Đối chiếu (${bestMatch.itemName})`);
+          }
+
+          // ── Determine final status ──
+          if (hasAttributeDiscrepancy) {
+            status = 'MISMATCH';
+          } else if (highestScore >= 0.95) {
+            status = 'MATCH_PERFECT';
+          } else if (highestScore >= 0.75) {
+            status = 'MATCH_GOOD';
+          } else if (highestScore >= 0.50) {
+            status = 'MATCH_MODERATE';
+          } else {
+            status = 'MATCH_WEAK';
           }
         }
 
         comparisons[other.fileName] = {
           status,
-          matchedItem: bestMatch, // Removed redundant threshold check since it's already verified and pushed conditionally
+          matchScore: Math.min(1, highestScore),
+          matchedItem: bestMatch,
           discrepancies,
           suggestions: suggestions.length > 0 ? suggestions : undefined
         };

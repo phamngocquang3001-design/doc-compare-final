@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, AlertCircle, CheckCircle2, XCircle, HelpCircle, ArrowRight, Download, RefreshCw, Loader2, FileImage, Filter, Copy } from 'lucide-react';
+import { Upload, FileText, AlertCircle, CheckCircle2, XCircle, HelpCircle, ArrowRight, Download, RefreshCw, Loader2, FileImage, Filter, Copy, Eye, EyeOff, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { processDocument, processDocuments } from './lib/gemini';
 import { processDocumentOpenAI, processDocumentsOpenAI } from './lib/openai';
@@ -44,14 +44,17 @@ export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [reportData, setReportData] = useState<ReportData | null>(null);
+  const [extractedDocuments, setExtractedDocuments] = useState<DocumentData[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilters, setStatusFilters] = useState<MatchStatus[]>(['MATCH', 'MISMATCH', 'MISSING', 'UNCERTAIN']);
+  const [statusFilters, setStatusFilters] = useState<MatchStatus[]>(['MATCH_PERFECT', 'MATCH_GOOD', 'MATCH_MODERATE', 'MATCH_WEAK', 'MISSING', 'MISMATCH']);
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [selectedBaseFileName, setSelectedBaseFileName] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState<AIProvider>('openai');
   const [compareFields, setCompareFields] = useState<CompareField[]>(DEFAULT_COMPARE_FIELDS);
   const [discrepancyFilter, setDiscrepancyFilter] = useState<'itemName' | 'unit' | 'quantity' | 'unitPrice' | 'totalPrice' | null>(null);
   const [itemCodeLocations, setItemCodeLocations] = useState<Record<string, ItemCodeLocation>>({});
+  const [showRawData, setShowRawData] = useState<boolean>(false);
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -210,6 +213,7 @@ export default function App() {
       }
 
       console.log(`[DEBUG APP] Toàn bộ dữ liệu đã trích xuất:`, extractedDocs);
+      setExtractedDocuments(extractedDocs);
       setProcessingStatus('Đang phân tích và đối chiếu dữ liệu (Ngữ nghĩa)...');
       const report = await generateReport(extractedDocs, selectedBaseFileName, aiProvider, compareFields);
       console.log(`[DEBUG APP] Báo cáo đối chiếu:`, report);
@@ -226,29 +230,46 @@ export default function App() {
   const resetApp = () => {
     setFiles([]);
     setReportData(null);
+    setExtractedDocuments([]);
     setError(null);
-    setStatusFilters(['MATCH', 'MISMATCH', 'MISSING', 'UNCERTAIN']);
+    setStatusFilters(['MATCH_PERFECT', 'MATCH_GOOD', 'MATCH_MODERATE', 'MATCH_WEAK', 'MISSING', 'MISMATCH']);
     setSelectedBaseFileName(null);
     setCompareFields(DEFAULT_COMPARE_FIELDS);
     setItemCodeLocations({});
+    setShowRawData(false);
+    setExpandedFiles(new Set());
     setAppState('UPLOAD');
+  };
+
+  const toggleExpandedFile = (fileName: string) => {
+    setExpandedFiles(prev => {
+      const next = new Set(prev);
+      if (next.has(fileName)) next.delete(fileName);
+      else next.add(fileName);
+      return next;
+    });
   };
 
   const getStatusIcon = (status: MatchStatus) => {
     switch (status) {
-      case 'MATCH': return <CheckCircle2 className="w-5 h-5 text-emerald-500" />;
+      case 'MATCH_PERFECT': return <CheckCircle2 className="w-5 h-5 text-emerald-600" />;
+      case 'MATCH_GOOD': return <CheckCircle2 className="w-5 h-5 text-teal-500" />;
+      case 'MATCH_MODERATE': return <HelpCircle className="w-5 h-5 text-amber-500" />;
+      case 'MATCH_WEAK': return <AlertCircle className="w-5 h-5 text-orange-500" />;
       case 'MISMATCH': return <XCircle className="w-5 h-5 text-rose-500" />;
       case 'MISSING': return <AlertCircle className="w-5 h-5 text-slate-400" />;
-      case 'UNCERTAIN': return <HelpCircle className="w-5 h-5 text-amber-500" />;
     }
   };
 
-  const getStatusBadge = (status: MatchStatus) => {
+  const getStatusBadge = (status: MatchStatus, score?: number) => {
+    const pct = score && score > 0 ? ` ${Math.round(score * 100)}%` : '';
     switch (status) {
-      case 'MATCH': return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Khớp</span>;
-      case 'MISMATCH': return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-700">Lệch</span>;
-      case 'MISSING': return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">Thiếu</span>;
-      case 'UNCERTAIN': return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Nghi ngờ</span>;
+      case 'MATCH_PERFECT': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">✓ Khớp hoàn toàn</span>;
+      case 'MATCH_GOOD': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-teal-100 text-teal-700">✓ Khớp tốt{pct}</span>;
+      case 'MATCH_MODERATE': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">~ Khớp vừa{pct}</span>;
+      case 'MATCH_WEAK': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">⚠ Khớp kém{pct}</span>;
+      case 'MISMATCH': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-700">≠ Lệch{pct}</span>;
+      case 'MISSING': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">∅ Thiếu</span>;
     }
   };
 
@@ -316,11 +337,14 @@ export default function App() {
       reportData.otherFiles.forEach(f => {
         const comp = result.comparisons[f.fileName];
         let statusText = '';
+        const scorePct = comp.matchScore > 0 ? ` ${Math.round(comp.matchScore * 100)}%` : '';
         switch (comp.status) {
-          case 'MATCH': statusText = 'Khớp'; break;
-          case 'MISMATCH': statusText = 'Lệch'; break;
+          case 'MATCH_PERFECT': statusText = 'Khớp hoàn toàn'; break;
+          case 'MATCH_GOOD': statusText = `Khớp tốt${scorePct}`; break;
+          case 'MATCH_MODERATE': statusText = `Khớp vừa${scorePct}`; break;
+          case 'MATCH_WEAK': statusText = `Khớp kém${scorePct}`; break;
+          case 'MISMATCH': statusText = `Lệch${scorePct}`; break;
           case 'MISSING': statusText = 'Thiếu'; break;
-          case 'UNCERTAIN': statusText = 'Nghi ngờ'; break;
         }
         rowData.push(statusText);
 
@@ -546,30 +570,38 @@ export default function App() {
     });
   };
 
+  const ALL_STATUSES: MatchStatus[] = ['MATCH_PERFECT', 'MATCH_GOOD', 'MATCH_MODERATE', 'MATCH_WEAK', 'MISSING', 'MISMATCH'];
+
   const toggleAllFilters = () => {
-    if (statusFilters.length === 4) {
+    if (statusFilters.length === ALL_STATUSES.length) {
       setStatusFilters([]);
     } else {
-      setStatusFilters(['MATCH', 'MISMATCH', 'MISSING', 'UNCERTAIN']);
+      setStatusFilters([...ALL_STATUSES]);
     }
   };
 
-  const statusCounts = {
-    MATCH: 0,
-    MISMATCH: 0,
+  const getOverallStatus = (result: any): MatchStatus => {
+    const statuses: MatchStatus[] = Object.values(result.comparisons).map((c: any) => c.status);
+    if (statuses.includes('MISSING')) return 'MISSING';
+    if (statuses.includes('MISMATCH')) return 'MISMATCH';
+    if (statuses.includes('MATCH_WEAK')) return 'MATCH_WEAK';
+    if (statuses.includes('MATCH_MODERATE')) return 'MATCH_MODERATE';
+    if (statuses.includes('MATCH_GOOD')) return 'MATCH_GOOD';
+    return 'MATCH_PERFECT';
+  };
+
+  const statusCounts: Record<MatchStatus, number> = {
+    MATCH_PERFECT: 0,
+    MATCH_GOOD: 0,
+    MATCH_MODERATE: 0,
+    MATCH_WEAK: 0,
     MISSING: 0,
-    UNCERTAIN: 0
+    MISMATCH: 0
   };
 
   if (reportData) {
     reportData.results.forEach(result => {
-      const statuses = Object.values(result.comparisons).map((c: any) => c.status);
-      let overallStatus: MatchStatus = 'MATCH';
-      if (statuses.includes('MISSING')) overallStatus = 'MISSING';
-      else if (statuses.includes('MISMATCH')) overallStatus = 'MISMATCH';
-      else if (statuses.includes('UNCERTAIN')) overallStatus = 'UNCERTAIN';
-
-      statusCounts[overallStatus]++;
+      statusCounts[getOverallStatus(result)]++;
     });
   }
 
@@ -578,13 +610,8 @@ export default function App() {
     let matchesStatus = true;
     if (statusFilters.length === 0) {
       matchesStatus = false;
-    } else if (statusFilters.length < 4) {
-      const statuses = Object.values(result.comparisons).map((c: any) => c.status);
-      let overallStatus: MatchStatus = 'MATCH';
-      if (statuses.includes('MISSING')) overallStatus = 'MISSING';
-      else if (statuses.includes('MISMATCH')) overallStatus = 'MISMATCH';
-      else if (statuses.includes('UNCERTAIN')) overallStatus = 'UNCERTAIN';
-      matchesStatus = statusFilters.includes(overallStatus);
+    } else if (statusFilters.length < ALL_STATUSES.length) {
+      matchesStatus = statusFilters.includes(getOverallStatus(result));
     }
     
     // 2. Discrepancy Field Filter
@@ -870,11 +897,23 @@ export default function App() {
                   <span className="text-sm font-medium text-slate-500 flex items-center gap-1 mr-2">
                     <Filter className="w-4 h-4" /> Lọc trạng thái:
                   </span>
-                  <button onClick={toggleAllFilters} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.length === 4 ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Tất cả ({reportData.results.length})</button>
-                  <button onClick={() => toggleFilter('MISMATCH')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('MISMATCH') ? 'bg-rose-600 text-white' : 'bg-rose-100 text-rose-700 hover:bg-rose-200'}`}>Lệch ({statusCounts.MISMATCH})</button>
-                  <button onClick={() => toggleFilter('MISSING')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('MISSING') ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Thiếu ({statusCounts.MISSING})</button>
-                  <button onClick={() => toggleFilter('UNCERTAIN')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('UNCERTAIN') ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>Nghi ngờ ({statusCounts.UNCERTAIN})</button>
-                  <button onClick={() => toggleFilter('MATCH')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('MATCH') ? 'bg-emerald-600 text-white' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>Khớp hoàn toàn ({statusCounts.MATCH})</button>
+                  <button onClick={toggleAllFilters} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.length === ALL_STATUSES.length ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Tất cả ({reportData.results.length})</button>
+                  <button onClick={() => toggleFilter('MISMATCH')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('MISMATCH') ? 'bg-rose-600 text-white' : 'bg-rose-100 text-rose-700 hover:bg-rose-200'}`}>≠ Lệch ({statusCounts.MISMATCH})</button>
+                  <button onClick={() => toggleFilter('MISSING')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('MISSING') ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>∅ Thiếu ({statusCounts.MISSING})</button>
+                  <button onClick={() => toggleFilter('MATCH_WEAK')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('MATCH_WEAK') ? 'bg-orange-500 text-white' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'}`}>⚠ Khớp kém ({statusCounts.MATCH_WEAK})</button>
+                  <button onClick={() => toggleFilter('MATCH_MODERATE')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('MATCH_MODERATE') ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>~ Khớp vừa ({statusCounts.MATCH_MODERATE})</button>
+                  <button onClick={() => toggleFilter('MATCH_GOOD')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('MATCH_GOOD') ? 'bg-teal-600 text-white' : 'bg-teal-100 text-teal-700 hover:bg-teal-200'}`}>✓ Khớp tốt ({statusCounts.MATCH_GOOD})</button>
+                  <button onClick={() => toggleFilter('MATCH_PERFECT')} className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${statusFilters.includes('MATCH_PERFECT') ? 'bg-emerald-600 text-white' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>✓ Khớp hoàn toàn ({statusCounts.MATCH_PERFECT})</button>
+                </div>
+
+                {/* Legend explaining each status */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 pt-3 border-t border-slate-100">
+                  <div className="flex items-start gap-1.5 text-xs"><span className="text-emerald-600 font-bold mt-px">✓✓</span><span className="text-slate-600"><b className="text-slate-800">Khớp hoàn toàn</b>: ≥95% — sản phẩm trùng khớp. </span></div>
+                  <div className="flex items-start gap-1.5 text-xs"><span className="text-teal-600 font-bold mt-px">✓</span><span className="text-slate-600"><b className="text-slate-800">Khớp tốt</b>: 75-95% — rất có thể cùng sản phẩm.</span></div>
+                  <div className="flex items-start gap-1.5 text-xs"><span className="text-amber-600 font-bold mt-px">~</span><span className="text-slate-600"><b className="text-slate-800">Khớp vừa</b>: 50-75% — tên gần giống, cần kiểm tra.</span></div>
+                  <div className="flex items-start gap-1.5 text-xs"><span className="text-orange-600 font-bold mt-px">⚠</span><span className="text-slate-600"><b className="text-slate-800">Khớp kém</b>: 40-50% — tên khác nhiều, khả năng sai.</span></div>
+                  <div className="flex items-start gap-1.5 text-xs"><span className="text-slate-400 font-bold mt-px">∅</span><span className="text-slate-600"><b className="text-slate-800">Thiếu</b>: &lt;40% — không tìm thấy sản phẩm.</span></div>
+                  <div className="flex items-start gap-1.5 text-xs"><span className="text-rose-600 font-bold mt-px">≠</span><span className="text-slate-600"><b className="text-slate-800">Lệch</b>: Tìm được sản phẩm nhưng SL/giá/ĐVT khác.</span></div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
@@ -914,6 +953,84 @@ export default function App() {
                 </div>
               </div>
 
+              {/* ── Raw extraction data panel ── */}
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                <button
+                  onClick={() => {
+                    setShowRawData(v => !v);
+                    if (!showRawData) {
+                      // auto-expand all files the first time
+                      setExpandedFiles(new Set(extractedDocuments.map(d => d.fileName)));
+                    }
+                  }}
+                  className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors"
+                >
+                  <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    {showRawData ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    Dữ liệu AI đã trích xuất ({extractedDocuments.reduce((s, d) => s + d.lineItems.length, 0)} dòng, {extractedDocuments.length} file)
+                  </span>
+                  {showRawData ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                </button>
+
+                {showRawData && (
+                  <div className="border-t border-slate-200 divide-y divide-slate-200">
+                    {extractedDocuments.map((doc) => (
+                      <div key={doc.fileName}>
+                        <button
+                          onClick={() => toggleExpandedFile(doc.fileName)}
+                          className="w-full flex items-center justify-between px-5 py-3 bg-slate-50 hover:bg-slate-100 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 text-sm">
+                            <FileText className="w-4 h-4 text-blue-500 shrink-0" />
+                            <span className="font-semibold text-slate-800">{doc.fileName}</span>
+                            <span className="text-slate-500">·</span>
+                            <span className="text-slate-500">{doc.documentType}</span>
+                            {doc.documentNumber && <><span className="text-slate-500">·</span><span className="text-slate-500">Số: {doc.documentNumber}</span></>}
+                            {doc.date && <><span className="text-slate-500">·</span><span className="text-slate-500">{doc.date}</span></>}
+                            <span className="ml-2 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium text-xs">{doc.lineItems.length} dòng</span>
+                          </div>
+                          {expandedFiles.has(doc.fileName)
+                            ? <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+                            : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
+                        </button>
+
+                        {expandedFiles.has(doc.fileName) && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs text-left">
+                              <thead>
+                                <tr className="bg-slate-100 text-slate-600 uppercase tracking-wider">
+                                  <th className="px-3 py-2 font-semibold w-8">#</th>
+                                  <th className="px-3 py-2 font-semibold">Mã hàng</th>
+                                  <th className="px-3 py-2 font-semibold min-w-[260px]">Tên hàng</th>
+                                  <th className="px-3 py-2 font-semibold">ĐVT</th>
+                                  <th className="px-3 py-2 font-semibold text-right">Số lượng</th>
+                                  <th className="px-3 py-2 font-semibold text-right">Đơn giá</th>
+                                  <th className="px-3 py-2 font-semibold text-right">Thành tiền</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {doc.lineItems.map((item, idx) => (
+                                  <tr key={item.id ?? idx} className="hover:bg-blue-50/40 transition-colors">
+                                    <td className="px-3 py-2 text-slate-400 font-mono">{item.originalIndex}</td>
+                                    <td className="px-3 py-2 font-mono text-blue-600 whitespace-nowrap">{item.itemCode ?? <span className="text-slate-300">—</span>}</td>
+                                    <td className="px-3 py-2 text-slate-800 leading-snug">{item.itemName}</td>
+                                    <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{item.unit ?? <span className="text-slate-300">—</span>}</td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-700">{item.quantity?.toLocaleString() ?? <span className="text-slate-300">—</span>}</td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-700">{item.unitPrice?.toLocaleString() ?? <span className="text-slate-300">—</span>}</td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-700">{item.totalPrice?.toLocaleString() ?? <span className="text-slate-300">—</span>}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Comparison table ── */}
               <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">

@@ -22,10 +22,11 @@ export interface DocumentData {
   lineItems: LineItem[];
 }
 
-export type MatchStatus = 'MATCH' | 'MISMATCH' | 'MISSING' | 'UNCERTAIN';
+export type MatchStatus = 'MATCH_PERFECT' | 'MATCH_GOOD' | 'MATCH_MODERATE' | 'MATCH_WEAK' | 'MISSING' | 'MISMATCH';
 
 export interface ComparisonDetail {
   status: MatchStatus;
+  matchScore: number;
   matchedItem?: LineItem;
   discrepancies: string[];
   suggestions?: { item: LineItem; score: number }[];
