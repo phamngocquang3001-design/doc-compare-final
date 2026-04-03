@@ -356,8 +356,9 @@ export async function generateReport(
       const codeKey = normalizeCodeText(item.itemCode);
       const nameKey = normalizeMatchText(item.itemName);
 
-      // Group by itemCode primarily. If code is missing, fallback to name to avoid squashing
-      const key = codeKey ? `CODE-${codeKey}` : `NAME-${nameKey}`;
+      // Group by both itemCode and itemName to prevent squashing variants that share a base code 
+      // but have different descriptors (e.g. Colors, sizes)
+      const key = codeKey ? `CODE-${codeKey}-NAME-${nameKey}` : `NAME-${nameKey}`;
 
       if (itemMap.has(key)) {
         const existing = itemMap.get(key)!;
@@ -411,6 +412,7 @@ export async function generateReport(
 
   const otherFiles = documents.filter(d => d.fileName !== baseFile.fileName);
   const results: ComparisonResult[] = [];
+  const extraItems: Record<string, LineItem[]> = {};
 
   // 2. Get embeddings for base file items
   const baseItemNames = baseFile.lineItems.map(item => item.itemName);
@@ -444,6 +446,7 @@ export async function generateReport(
   for (let fileIdx = 0; fileIdx < otherFilesWithEmbeddings.length; fileIdx++) {
     const other = otherFilesWithEmbeddings[fileIdx];
     const scoreMatrix: { baseIdx: number; otherIdx: number; score: number }[] = [];
+    const globallyAssignedOtherItems = new Set<LineItem>();
 
     for (let j = 0; j < other.file.lineItems.length; j++) {
       const otherItem = other.file.lineItems[j];
@@ -504,18 +507,24 @@ export async function generateReport(
           item: otherItem,
           score: Math.min(1, highestScore)
         });
+        globallyAssignedOtherItems.add(otherItem);
       }
+    }
+
+    // Capture extra/unassigned items
+    const unassignedItemsForThisFile = other.file.lineItems.filter(item => !globallyAssignedOtherItems.has(item));
+    if (unassignedItemsForThisFile.length > 0) {
+      extraItems[other.file.fileName] = unassignedItemsForThisFile;
     }
 
     // Populate suggestions for each base item
     for (let i = 0; i < baseFile.lineItems.length; i++) {
       const scoresForBase = scoreMatrix.filter(m => m.baseIdx === i).sort((a, b) => b.score - a.score);
-      const assignedToThis = allAssignments[i][other.file.fileName].map(a => a.item);
       const suggestions: { item: LineItem; score: number }[] = [];
 
       for (const s of scoresForBase) {
         const otherItem = other.file.lineItems[s.otherIdx];
-        if (!assignedToThis.includes(otherItem)) {
+        if (!globallyAssignedOtherItems.has(otherItem)) {
           suggestions.push({ item: otherItem, score: Math.min(1, s.score) });
         }
         if (suggestions.length >= 3) break;
@@ -549,16 +558,6 @@ export async function generateReport(
 
         // Show suggestions only on the last duplicated row for this base item
         const suggestions = (rowIdx === maxRowsForThisBaseItem - 1) ? allSuggestions[i][other.fileName] : [];
-
-        // When no item was directly assigned, promote the best suggestion
-        // with score >= 0.40 so it still shows up instead of being hidden
-        if (!bestMatch && suggestions.length > 0) {
-          const topSuggestion = suggestions[0];
-          if (topSuggestion && topSuggestion.score >= 0.40) {
-            bestMatch = topSuggestion.item;
-            highestScore = topSuggestion.score;
-          }
-        }
 
         let status: MatchStatus = 'MISSING';
         const discrepancies: string[] = [];
@@ -645,6 +644,7 @@ export async function generateReport(
     baseFile,
     otherFiles,
     results,
+    extraItems,
     compareFields: activeCompareFields,
   };
 }

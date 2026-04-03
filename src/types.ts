@@ -41,5 +41,6 @@ export interface ReportData {
   baseFile: DocumentData;
   otherFiles: DocumentData[];
   results: ComparisonResult[];
+  extraItems?: Record<string, LineItem[]>;
   compareFields: CompareField[];
 }

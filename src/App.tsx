@@ -1184,6 +1184,44 @@ export default function App() {
                   </table>
                 </div>
               </div>
+
+              {/* Extra / Unassigned Items Section */}
+              {reportData.extraItems && Object.keys(reportData.extraItems).length > 0 && (
+                <div className="mt-8 bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+                  <div className="bg-slate-50 border-b border-slate-200 p-4">
+                    <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                      <AlertCircle className="w-5 h-5 text-orange-500" />
+                      Phát sinh thêm ở file đối chiếu (Không có trong gốc)
+                    </h3>
+                    <p className="text-sm text-slate-500 mt-1">Các mặt hàng có trong file đối chiếu nhưng không ghép được với mặt hàng nào ở file gốc.</p>
+                  </div>
+                  <div className="p-4 space-y-6">
+                    {Object.entries(reportData.extraItems).map(([fileName, items], i) => (
+                      <div key={i}>
+                        <h4 className="font-medium text-slate-700 mb-3 flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-slate-400" /> {fileName}
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {(items as LineItem[]).map((item, idx) => (
+                            <div key={idx} className="bg-orange-50 border border-orange-100 p-3 rounded-lg flex flex-col justify-between">
+                              <div className="font-medium text-slate-800 text-sm mb-2">
+                                {item.itemCode && <span className="text-orange-600 mr-1">[{item.itemCode}]</span>}
+                                {item.itemName}
+                              </div>
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+                                {item.quantity !== null && <span>SL: <strong className="text-slate-800">{item.quantity}</strong></span>}
+                                {item.unit && <span>ĐVT: <strong className="text-slate-800">{item.unit}</strong></span>}
+                                {item.unitPrice !== null && <span>Giá: <strong className="text-slate-800">{item.unitPrice.toLocaleString()}</strong></span>}
+                                {item.totalPrice !== null && <span>TC: <strong className="text-slate-800">{item.totalPrice.toLocaleString()}</strong></span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
