@@ -52,13 +52,19 @@ function getSchema(location: ItemCodeLocation) {
 }
 
 function getItemCodePrompt(location: ItemCodeLocation): string {
+  let prompt = "";
   if (location === 'separate_column') {
-    return "Mã hàng (itemCode): CHỈ lấy từ cột 'Mã hàng' riêng biệt (thường là cột rỗng hoặc ký hiệu ngắn). KHÔNG trích xuất chui từ trong Tên hàng.";
+    prompt = "Mã hàng (itemCode): CHỈ lấy từ cột 'Mã hàng' riêng biệt (thường là cột rỗng hoặc ký hiệu ngắn). KHÔNG trích xuất chui từ trong Tên hàng.";
   } else if (location === 'in_name') {
-    return "Mã hàng (itemCode): ***BẮT BUỘC BỎ QUA CÁC CỘT CHỨA MÃ ĐỨNG RIÊNG LẺ***. Thay vào đó, bạn PHẢI đọc cột 'Tên hàng' (cột có chuỗi text mô tả rất dài) và tự cắt/trích xuất mã sản phẩm rớt ra từ chuỗi Tên hàng đó. VD: Tên hàng là '5382_File hồ sơ', bạn trả về itemCode = '5382' và itemName = '5382_File hồ sơ'.  Hãy CẨN THẬN khi không thấy tiêu đề cột ở các trang sau, đừng lầm tưởng cái cột mã ngắn ngủn đứng riêng kia là itemCode cần lấy!";
+    prompt = "Mã hàng (itemCode): ***BẮT BUỘC BỎ QUA CÁC CỘT CHỨA MÃ ĐỨNG RIÊNG LẺ***. Thay vào đó, bạn PHẢI đọc cột 'Tên hàng' (cột có chuỗi text mô tả rất dài) và tự cắt/trích xuất mã sản phẩm rớt ra từ chuỗi Tên hàng đó. VD: Tên hàng là '5382_File hồ sơ', bạn trả về itemCode = '5382' và itemName = '5382_File hồ sơ'.  Hãy CẨN THẬN khi không thấy tiêu đề cột ở các trang sau, đừng lầm tưởng cái cột mã ngắn ngủn đứng riêng kia là itemCode cần lấy!";
   } else {
-    return "Mã hàng (itemCode): Ưu tiên lấy từ cột 'Mã hàng' riêng biệt. Nếu không có cột riêng, hãy trích xuất mã hàng nếu nó nằm lẫn bên trong chuỗi Tên hàng hóa.";
+    prompt = "Mã hàng (itemCode): Ưu tiên lấy từ cột 'Mã hàng' riêng biệt. Nếu không có cột riêng, hãy trích xuất mã hàng nếu nó nằm lẫn bên trong chuỗi Tên hàng hóa.";
   }
+  
+  if (location !== 'separate_column') {
+    prompt += " LƯU Ý KHI TRÍCH XUẤT MÃ TỪ TÊN: Mã sản phẩm thường là chuỗi dài hơn 3 ký tự, chứa cả chữ và số (hoặc chuỗi số liệu lôgíc). KHÔNG lấy các tiền tố/thương hiệu quá ngắn hoặc trong ngoặc đơn ở đầu nếu có mã dài hơn. VD: Trong tên '(MG) FCS90801 Com pa chì kim', mã đúng là 'FCS90801', TUYỆT ĐỐI KHÔNG LẤY 'MG'.";
+  }
+  return prompt;
 }
 
 function buildGeminiPromptSingle(itemCodeLocation: ItemCodeLocation): string {
