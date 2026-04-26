@@ -265,3 +265,50 @@ export async function getEmbeddings(texts: string[]): Promise<number[][]> {
   return allEmbeddings;
 }
 
+export async function processExcelCSVWithGemini(csvData: string, logicalFileName: string, itemCodeLocation: ItemCodeLocation): Promise<DocumentData> {
+  const promptText = buildGeminiPromptSingle(itemCodeLocation) + "\n\nDưới đây là dữ liệu bảng Excel (định dạng CSV):\n" + csvData;
+
+  const contents = [promptText];
+
+  let response;
+  try {
+    const ai = getAI();
+    response = await ai.models.generateContent({
+      model: "gemini-3.1-flash-lite-preview",
+      contents,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: getSchema(itemCodeLocation)
+        },
+        temperature: 0.1,
+        maxOutputTokens: 8192,
+      }
+    });
+  } catch (genError: any) {
+    console.error("Gemini API Error:", genError);
+    throw new Error(`Lỗi từ AI: ${genError.message || 'Không xác định'}`);
+  }
+
+  const text = response.text;
+  if (!text) throw new Error("No text returned from Gemini");
+
+  let parsedArray;
+  try {
+    parsedArray = JSON.parse(text);
+  } catch (error) {
+    try {
+      const repairedText = jsonrepair(text);
+      parsedArray = JSON.parse(repairedText);
+    } catch (repairError) {
+      throw new Error("Không thể đọc dữ liệu từ AI.");
+    }
+  }
+
+  if (!Array.isArray(parsedArray)) {
+    parsedArray = [parsedArray];
+  }
+
+  return flattenGeminiDocuments(parsedArray, logicalFileName, itemCodeLocation);
+}

@@ -270,3 +270,65 @@ export async function getEmbeddingsOpenAI(texts: string[]): Promise<number[][]> 
 
   return allEmbeddings;
 }
+export async function processExcelCSVWithOpenAI(csvData: string, logicalFileName: string, itemCodeLocation: ItemCodeLocation): Promise<DocumentData> {
+  const promptText = buildOpenAIPromptSingle(itemCodeLocation) + "\n\nDưới đây là dữ liệu bảng Excel (định dạng CSV):\n" + csvData;
+
+  let response;
+  try {
+    const openai = getOpenAI();
+    response = await openai.chat.completions.create({
+      model: "gpt-5.4-mini-2026-03-17",
+      messages: [
+        {
+          role: "user",
+          content: promptText
+        }
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "documents",
+          schema: {
+            type: "object",
+            properties: {
+              documents: {
+                type: "array",
+                items: getSchema(itemCodeLocation)
+              }
+            },
+            required: ["documents"],
+            additionalProperties: false
+          },
+          strict: true
+        }
+      },
+      temperature: 0.1,
+    });
+  } catch (genError: any) {
+    console.error("OpenAI API Error:", genError);
+    throw new Error(`Lỗi từ AI: ${genError.message || 'Không xác định'}`);
+  }
+
+  const text = response.choices[0]?.message?.content;
+  if (!text) throw new Error("No text returned from OpenAI");
+
+  let parsedArray;
+  try {
+    const parsedObj = JSON.parse(text);
+    parsedArray = parsedObj.documents;
+  } catch (error) {
+    try {
+      const repairedText = jsonrepair(text);
+      const parsedObj = JSON.parse(repairedText);
+      parsedArray = parsedObj.documents;
+    } catch (repairError) {
+      throw new Error("Không thể đọc dữ liệu từ AI.");
+    }
+  }
+
+  if (!Array.isArray(parsedArray)) {
+    parsedArray = [parsedArray];
+  }
+
+  return flattenOpenAIDocuments(parsedArray, logicalFileName, itemCodeLocation);
+}

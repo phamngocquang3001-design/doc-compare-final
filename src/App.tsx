@@ -11,6 +11,9 @@ import { processDocumentOpenAI, processDocumentsOpenAI } from './lib/openai';
 import { generateReport } from './lib/compare';
 import { DocumentData, ReportData, MatchStatus, AIProvider, CompareField, LineItem, ItemCodeLocation } from './types';
 import { splitFileWithMetadata } from './lib/fileSplitter';
+import { extractExcelCSV } from './lib/excelExtractor';
+import { processExcelCSVWithGemini } from './lib/gemini';
+import { processExcelCSVWithOpenAI } from './lib/openai';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
@@ -115,6 +118,35 @@ export default function App() {
     try {
       for (let i = 0; i < files.length; i++) {
         const originalFile = files[i];
+        
+        const extension = originalFile.name.split('.').pop()?.toLowerCase();
+        const isExcel = ['xlsx', 'xls', 'csv'].includes(extension || '');
+
+        if (isExcel) {
+          console.log(`[DEBUG APP] Đang xử lý file Excel ${i + 1}/${files.length}: ${originalFile.name} bằng AI`);
+          setProcessingStatus(`Đang đọc file Excel ${i + 1}/${files.length}: ${originalFile.name}...`);
+          
+          const csvData = await extractExcelCSV(originalFile);
+          const fileItemCodeLocation = itemCodeLocations[originalFile.name] || 'auto';
+          
+          let docData: DocumentData;
+          if (aiProvider === 'openai') {
+            docData = await processExcelCSVWithOpenAI(csvData, originalFile.name, fileItemCodeLocation);
+          } else {
+            docData = await processExcelCSVWithGemini(csvData, originalFile.name, fileItemCodeLocation);
+          }
+          
+          // Re-index line items
+          docData.lineItems = docData.lineItems.map((item, idx) => ({
+            ...item,
+            id: `${originalFile.name}-item-${idx}`,
+            originalIndex: idx + 1
+          }));
+
+          extractedDocs.push(docData);
+          continue; // Skip AI processing for Excel files
+        }
+
         console.log(`[DEBUG APP] Đang kiểm tra và cắt file ${i + 1}/${files.length}: ${originalFile.name}`);
         setProcessingStatus(`Đang kiểm tra file ${i + 1}/${files.length}: ${originalFile.name}...`);
 
